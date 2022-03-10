@@ -1,0 +1,368 @@
+---
+title: "Practicum1"
+output: html_notebook
+---
+
+```{r echo=FALSE}
+# 1. Library
+require(RMySQL)
+
+# 2. Settings
+db_user <- ''
+db_password <- ''
+db_name <- ''
+db_host <- ''
+db_port <- 3306
+fpath = ""
+
+# 3. Read data from db
+mydb <-  dbConnect(MySQL(), user = db_user, password = db_password,
+                 dbname = db_name, host = db_host, port = db_port)
+```
+
+#Create a set of SQL DDL statements for the above logical model and realize that schema in a new database.
+```{sql connection=mydb}
+DROP TABLE IF EXISTS Incident_Precipitation_Cond;
+```
+```{sql connection=mydb}
+DROP TABLE IF EXISTS Precipitation_Condition;
+```
+```{sql connection=mydb}
+DROP TABLE IF EXISTS Incident;
+```
+```{sql connection=mydb}
+DROP TABLE IF EXISTS Airport;
+```
+```{sql connection=mydb}
+DROP TABLE IF EXISTS Aircraft;
+```
+```{sql connection=mydb}
+DROP TABLE IF EXISTS Wildlife;
+```
+
+```{sql connection=mydb}
+CREATE TABLE Airport(
+  Airport_ID INT NOT NULL,
+  Airport_Name VARCHAR(255) NOT NULL,
+  Origin_State VARCHAR(255) NOT NULL,
+  PRIMARY KEY (Airport_ID)
+);
+```
+
+```{sql connection=mydb}
+CREATE TABLE Aircraft(
+  Aircraft_ID INT NOT NULL,
+  Make_model TEXT NOT NULL,
+  Aircraft_Type VARCHAR(255) NOT NULL,
+  Is_Large BOOLEAN NOT NULL,
+  Number_Of_Engines INT NOT NULL,
+  PRIMARY KEY (Aircraft_ID)
+);
+```
+
+```{sql connection=mydb}
+CREATE table Wildlife(
+  Wildlife_ID INT NOT NULL,
+  Size VARCHAR(255) NOT NULL,
+  Species VARCHAR(255) NOT NULL,
+  PRIMARY KEY (Wildlife_ID)
+);
+```
+
+```{sql connection=mydb}
+CREATE TABLE Incident (
+  Record_ID INT NOT NULL,
+  Impact_to_flight VARCHAR(255) NOT NULL,
+  Flight_Date DATE NOT NULL,
+  Is_damage_indicated BOOLEAN NOT NULL,
+  Aircraft_ID INT NOT NULL,
+  Wildlife_ID INT NOT NULL,
+  Airport_ID INT NOT NULL,
+  Actual_Number_Struck INT NOT NULL,
+  Altitude BINARY NOT NULL,
+  Number_of_injured INT NOT NULL,
+  Remarks TEXT,
+  Pilot_Warned BOOLEAN NOT NULL,
+  Feet_above_ground INT NOT NULL,
+  Cost INT NOT NULL,
+  Phase VARCHAR(255) NOT NULL,
+  Airline_Operator VARCHAR(255) NOT NULL,
+  Remains_of_wildlife_collected BOOLEAN,
+  Remains_of_wildlife_sent_to_Smithsonian BOOLEAN,
+  PRIMARY KEY (Record_ID),
+  FOREIGN KEY (Aircraft_ID) REFERENCES Aircraft(Aircraft_ID),
+  FOREIGN KEY (Wildlife_ID) REFERENCES Wildlife(Wildlife_ID),
+  FOREIGN KEY (Airport_ID) REFERENCES Airport(Airport_ID)
+);
+```
+
+```{sql connection=mydb}
+CREATE TABLE Precipitation_Condition(
+  PC_ID INT NOT NULL,
+  Conditions VARCHAR(255) NOT NULL,
+  PRIMARY KEY (PC_ID)
+);
+```
+
+```{sql connection=mydb}
+CREATE TABLE Incident_Precipitation_Cond(
+  Record_ID INT NOT NULL,
+  PC_ID INT NOT NULL,
+  PRIMARY KEY (Record_ID, PC_ID),
+  FOREIGN KEY (Record_ID) REFERENCES Incident(Record_ID),
+  FOREIGN KEY (PC_ID) REFERENCES Precipitation_Condition(PC_ID)
+);
+```
+
+
+
+
+```{r}
+df = read.csv('BirdStrikesData.csv')
+```
+
+#Omit the empty aircraft information
+```{r}
+df = df[which(df$Aircraft..Type!=""),]
+```
+
+#Rename each column name the same as the table attributes name
+```{r}
+colnames(df) = c("Record_ID","Aircraft_Type","Airport_Name","Altitude", "Make_model","Number_Struck","Actual_Number_Struck","Impact_To_Flight","Flight_Date",
+                 "Is_Damage_Indicated",
+ "Number_Of_Engines","Airline_Operator","Origin_State","Phase","Conditions",
+ "Remains_of_wildlife_collected","Remains_of_wildlife_sent_to_Smithsonian","Remarks","Size",
+ "Conditions_Sky","Species","Pilot_Warned","Cost","Feet_above_ground","Number_of_injured",
+ "Is_Large")
+```
+
+#Create a column of airport id and extract columns to create a new airport dataframe.
+#Delete duplicate rows in Airport dataframe
+```{r}
+#df$Airport_ID = cumsum(!duplicated(df$Airport_Name))
+library(dplyr)
+df$Airport_ID = df%>%group_indices(Airport_Name)
+df_Airport = df[,c(27,3,13),drop=F]
+df_Airport = df_Airport[!duplicated(df_Airport$Airport_ID),]
+```
+
+#Load the airport dataframe to airport table
+```{r}
+dbSendQuery(mydb, "SET GLOBAL local_infile = true;")
+dbWriteTable(mydb, "Airport", df_Airport,overwite=TRUE,append=TRUE,row.names=F)
+```
+
+```{sql connection=mydb}
+select * from Airport LIMIT 50;
+```
+
+#Create a column of aircraft id 
+#Convert Is_Large attribute to boolean type
+#Extract columns to create a new Aircraft dataframe
+#Delete the duplicate rows in Aircraft dataframe
+```{r}
+df$Aircraft_ID = df %>% group_indices(Make_model)
+df$Is_Large[df$Is_Large=="Yes"] <- 1
+df$Is_Large[df$Is_Large=="No"] <- 0
+df_Aircraft = df[,c(28,5,2,26,11),drop=F]
+df_Aircraft = df_Aircraft[!duplicated(df_Aircraft$Aircraft_ID),]
+```
+
+#Load the Aircraft dataframe to Aircraft table
+```{r}
+dbSendQuery(mydb, "SET GLOBAL local_infile = true;")
+dbWriteTable(mydb, "Aircraft", df_Aircraft,append=T,row.names = F)
+```
+```{sql connection=mydb}
+select* from Aircraft LIMIT 50;
+```
+
+
+
+#Create a new column Wildlife_ID and extract columns to create a new Wildlife dataframe
+Delete duplicate rows in Wildlife dataframe
+```{r}
+df$Wildlife_ID = df %>% group_indices(Species)
+df_Wildlife = df[,c(29,19,21),drop=F]
+df_Wildlife= df_Wildlife[!duplicated(df_Wildlife$Wildlife_ID),]
+```
+
+#Load Wildlife dataframe to Wildlife table
+```{r}
+dbSendQuery(mydb, "SET GLOBAL local_infile = true;")
+dbWriteTable(mydb, "Wildlife", df_Wildlife,append=T,row.names = F)
+```
+
+```{sql connection=mydb}
+select * from Wildlife LIMIT 50;
+```
+
+#Create a new column PC_ID and extract two columns to form a new dataframe
+```{r}
+df$PC_ID = df %>% group_indices(Conditions)
+df_Incident_Precipitation_Cond = df[,c(1,30),drop=F]
+```
+
+#Load this dataframe Incident_Precipitation_Cond table
+```{r}
+
+dbWriteTable(mydb, "Incident_Precipitation_Cond",   
+             df_Incident_Precipitation_Cond,overwrite = T,row.names = F)
+```
+
+```{sql connection=mydb}
+select * from Incident_Precipitation_Cond LIMIT 50;
+```
+#Create a new dataframe called Precipitation_Condition based on Conditions and PC_ID
+#Delete duplicate rows
+```{r}
+df_Precipitation_Condition = df[,c(30,15),drop=F]
+df_Precipitation_Condition=  
+  df_Precipitation_Condition[!duplicated(df_Precipitation_Condition$PC_ID),]
+```
+
+#Load Precipitation_Condition dataframe to Precipitation_Condition table
+```{r}
+dbWriteTable(mydb, "Precipitation_Condition",   
+             df_Precipitation_Condition,append=T,row.names = F)
+```
+```{sql connection=mydb}
+select * from Precipitation_Condition
+```
+
+#Convert Is_Damage_Indicated to boolean
+```{r}
+df$Is_Damage_Indicated[df$Is_Damage_Indicated=="Caused damage"] <- 1
+df$Is_Damage_Indicated[df$Is_Damage_Indicated=="No damage"] <- 0
+```
+
+#Convert Pilot_Warned to boolean
+```{r}
+df$Pilot_Warned[df$Pilot_Warned=="Y"] <- 1
+df$Pilot_Warned[df$Pilot_Warned=="N"] <- 0
+```
+
+#Convert Remains_of_wildlife_collected and Remains_of_wildlife_sent_to_Smithsonian to boolean
+```{r}
+df$Remains_of_wildlife_collected[df$Remains_of_wildlife_collected=="TRUE"] <- 1
+df$Remains_of_wildlife_sent_to_Smithsonian[df$Remains_of_wildlife_sent_to_Smithsonian
+                                           =="True"] <-1
+```
+
+#Change the Flight_Date format to %Y-%m-%d
+```{r}
+df$Flight_Date = gsub(" 0:00","",df$Flight_Date)
+df$Flight_Date = strptime(as.character(df$Flight_Date),"%m/%d/%Y")
+df$Flight_Date = format(as.Date(df$Flight_Date), "%Y-%m-%d")
+```
+
+#Extract columns to create a Incident dataframe
+```{r}
+df_Incident= df[,c(1,7,8,9,10,28,29,27,4,25,18,22,24,23,14,12,16,17),drop=F]
+```
+
+#Load the Incident dataframe to Incident table
+```{r}
+dbWriteTable(mydb, "Incident",   
+             df_Incident,append=T,row.names = F)
+```
+
+```{sql connection=mydb}
+select * from Incident LIMIT 50;
+```
+#Create a SQL query against your database to find the number of bird strike incidents for each airline upon take-off or climb. Include all airlines.
+```{sql connection=mydb}
+SELECT Airline_Operator, COUNT(Record_ID) AS number_of_incidents_takeoff_or_climb
+FROM Incident
+WHERE Phase = 'Climb' OR Phase = 'Take-off run'
+GROUP BY Airline_Operator
+```
+
+#Create a SQL query against your database to find the airports that had the most bird strike incidents (during any flight phase). Include all airlines.
+```{sql connection=mydb}
+SELECT t2.Airport_Name
+FROM Incident AS t1
+LEFT JOIN Airport AS t2 ON t1.Airport_ID = t2.Airport_ID
+GROUP BY t1.Airport_ID
+HAVING COUNT(t1.Airport_ID) = (
+  SELECT COUNT(Airport_ID)
+  FROM Incident
+  GROUP BY Airport_ID
+  ORDER BY COUNT(Airport_ID) DESC
+  LIMIT 1
+)
+```
+
+#Create a SQL query against your database to find the number of bird strike incidents by year. Include all airlines
+```{sql connection=mydb}
+SELECT EXTRACT(year FROM Flight_Date) AS year, COUNT(Record_ID) AS number_of_incidents
+FROM Incident
+GROUP BY year
+ORDER BY year
+```
+
+#Visualizes the number of bird strikes incidents per year from 2008 to 2011 during take-off/climbing
+```{r}
+library(ggplot2)
+
+sql <- "SELECT year, number_of_incidents FROM (SELECT EXTRACT(year FROM Flight_Date) AS year, COUNT(Record_ID) AS    number_of_incidents
+      FROM Incident
+      WHERE Phase = 'Climb' OR Phase = 'Take-off run'
+      GROUP BY year
+      ORDER BY year) year_incident
+      WHERE year >= 2008"
+df <-dbGetQuery(mydb,sql)
+
+ggplot(df, aes(x = year, y = number_of_incidents)) +
+  geom_bar(stat='identity',fill = "#97B3C6") +
+  theme_bw() +
+  labs(x = "Year", y = "Number of Incidents", title = "strikes incidents per year during take-off/climbing")
+
+```
+#Visualizes the number of bird strikes incidents per year from 2008 to 2011 during descent/approach/landing
+```{r}
+sql <- "SELECT year, number_of_incidents FROM (SELECT EXTRACT(year FROM Flight_Date) AS year, COUNT(Record_ID) AS    number_of_incidents
+      FROM Incident
+      WHERE Phase = 'Approach' OR Phase = 'Landing Roll' OR Phase = 'Descent'
+      GROUP BY year
+      ORDER BY year) year_incident
+      WHERE year >= 2008"
+df <-dbGetQuery(mydb,sql)
+
+ggplot(df, aes(x = year, y = number_of_incidents)) +
+  geom_bar(stat='identity',fill = "#97B3C6") +
+  theme_bw() +
+  labs(x = "Year", y = "Number of Incidents", title = "strikes incidents per year during descent/approach/landing")
+```
+
+#Create a stored procedure that removes a bird strike incident from the database
+```{sql connection=mydb}
+DROP PROCEDURE IF EXISTS remove_bird_strike;
+```
+```{sql connection=mydb}
+CREATE PROCEDURE remove_bird_strike (IN p_record_id INT)
+BEGIN
+  DELETE FROM Incident
+  WHERE Record_ID = p_record_id;
+END;
+```
+
+Before procedure call:
+```{sql connection=mydb}
+SELECT * FROM Incident where Record_ID = 1195;
+```
+
+Call procedure:
+```{sql connection=mydb}
+CALL remove_bird_strike(1195);
+```
+
+After procedure call:
+```{sql connection=mydb}
+SELECT * FROM Incident where Record_ID = 1195;
+```
+
+
+```{r}
+dbDisconnect(mydb)
+```
